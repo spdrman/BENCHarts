@@ -512,7 +512,133 @@ non-positive value gets a hollow marker pinned to the axis floor and is counted 
 the disclosure note. Today the zero and the absent cell look identical to anyone
 who has not read the code.
 
-## 6. Repo layout
+## 6. Performance
+
+All numbers measured on an Apple M5, Node v26.9.0, under real load from other
+work (loadavg 3.8 to 5.1), so they are conservative rather than lab figures.
+
+### What the real run costs
+
+The checked-in report renders **18** charts plainly and **28** with `--zoom 20`.
+Warm medians per chart: history 6 µs, grouped bars 27 to 60 µs, sweep 20 to 45 µs.
+The whole 28-chart run is **0.83 ms** of render plus 0.14 ms of parsing, inside a
+CLI whose wall clock is 80 ms, 70 ms of which is Node starting up. Output totals
+239 KB raw, 43 KB gzipped. Peak RSS is 9.4 MB over bare Node.
+
+Nothing here is slow. The budgets below exist to catch a class of bug, not to
+chase microseconds.
+
+### The three paths I suspected were all the wrong ones
+
+Each is confirmed as written and irrelevant at any real size:
+
+| Path | Real cost | Starts mattering at |
+| --- | --- | --- |
+| `colorFor` → `ordered.indexOf(key)` | 0%, the fallback branch has never executed on real data | 32 unthemed series in one chart |
+| `ordered()` rebuilding a Set | 1.2% of the run, called **once** per render, not per series | ~10,000 records |
+| `rows.some(...)` inside a `filter` | 0.2 to 0.8%, and 0.1% at 65,536 rows | never |
+
+The actual hot path is **`fmtCoord`, at 55.4% of sampled self time**. Number
+formatting *is* the render: a sweep chart formats roughly 600 numeric attributes,
+and `Number.parseFloat(n.toFixed(5)).toString()` costs 83 ns a call.
+
+### Coordinate precision
+
+Dropping to 2 decimals saves **6.5% raw bytes and 8.1% gzipped** across the 28
+charts. Rasterised at 1x, 2x and 4x and diffed, the change touches 0.35% of pixels,
+almost all by 16/255 or less: one-pixel antialiasing along strokes, indistinguishable
+side by side. The largest geometric shift is 0.005 user units, and the reason the
+code gives for 5 decimals (equal pixel spacing between log decades) survives to
+within 0.01 units.
+
+**Correction to the measured recommendation.** The performance work proposed
+`String(Math.round(n * 100) / 100)` as both faster (30 ns vs 83 ns) and
+byte-identical to `toFixed(2)`. The speed holds. **The equivalence does not.** I
+found divergences immediately:
+
+```
+x = 2.675     toFixed(2) -> 2.67     arithmetic -> 2.68
+x = 1.115     toFixed(2) -> 1.11     arithmetic -> 1.12
+x = 184.065   toFixed(2) -> 184.06   arithmetic -> 184.07
+```
+
+Three in 200,000 probes. `toFixed` rounds on the decimal expansion of the stored
+double; `Math.round(n * 100)` rounds after a multiply that adds its own error, so
+they disagree wherever the product lands near `.5`.
+
+So BENCHarts **defines** its coordinate rule rather than inheriting one: round half
+away from zero to two decimals via `Math.round(n * 100) / 100`. It is specified in
+`docs/CONTRACT.md`, pinned by the goldens, and never described as equivalent to
+`toFixed`.
+
+### Budgets
+
+Set where the measurements justify, with headroom for a slower x86 runner.
+
+| Budget | Today | Projected | Limit |
+| --- | --- | --- | --- |
+| Per-chart render, warm | 6 to 60 µs | ≤ 90 µs | **≤ 200 µs** |
+| 28-chart run, in-process | 1.15 ms | ≈ 1.5 ms | **≤ 5 ms** |
+| 28 charts, fresh process | 3.5 to 4.3 ms | ≈ 5 ms | **≤ 15 ms** |
+| Bytes per chart | 16,251 | ≈ 18,500 | **≤ 24,000** |
+| Bytes per run | 239 KB | ≈ 275 KB | **≤ 320 KB raw, ≤ 60 KB gzip** |
+| Bytes per record | 508 B | ≈ 600 B | **≤ 800 B** |
+| Peak RSS over bare Node | +9.4 MB | +10 MB | **≤ +32 MB** |
+| Test suite wall clock | 0.36 s | 0.5 s | **≤ 2 s** |
+
+The per-record byte budget is the one that earns its place: it is deterministic and
+catches a per-mark duplication (a legend emitted per bar) that a total budget on
+small inputs would never notice.
+
+No budget is set on `ordered()`, the present-filter or `colorFor`. A budget nothing
+can trip is noise.
+
+### What the design review costs
+
+Measured by patching the additions in: per-mark `<title>` adds **14.1%** bytes and
+24% render time; a y-axis with 5 or 6 majors adds ~0.9 KB per chart; direct end
+labels ~100 B per series; the wrapping legend moves elements rather than adding
+them. After taking back 6.5% from 2dp coordinates, the biggest chart lands near
+18.5 KB, inside the 24 KB budget.
+
+The per-record validation pass D1 requires costs **2 to 3 ns per record**, 0.13% of
+an equal-size render at every size. Budget it as zero.
+
+### The numeric window is a value check, not a finiteness check
+
+`1.5e308` kills the process. The finite near-misses are the reason the guard cannot
+just test `Number.isFinite`:
+
+| Max y | Decades drawn | Render | Bytes |
+| --- | --- | --- | --- |
+| 1e6 | 7 | 0.06 ms | 13 KB |
+| 1e100 | 101 | 0.30 ms | 92 KB |
+| 1e300 | 301 | 0.86 ms | **263 KB** |
+| 1.5e308 | ∞ | heap death | — |
+
+A finite `1e300` draws a 263 KB axis in under a millisecond, and nothing in a timing
+budget would catch it. Hence R-VAL-4's window.
+
+### Keeping the budgets true without a flaky test
+
+Deterministic assertions carry the weight, because output bytes are a pure function
+of input: byte budgets on the goldens, linear byte growth, and helper-call counts
+through a counting theme. None can flake.
+
+The clocked assertions use a **min-of-samples** estimator, which matters more than
+the metric. Tested under ten spinning CPU hogs on a 10-core machine:
+
+| Estimator | Ambient | Under 2x oversubscription | Verdict |
+| --- | --- | --- | --- |
+| Wall median, 1024 vs 32 rows | 31 to 33 | 22 to 45 | cannot detect the bug it exists for |
+| Wall median, 4096 vs 32 | 124 to 133 | 112 to **256** | grazes the threshold, flaky |
+| **Min of 15 interleaved** | ≈132 | **132 to 145** | ±5% under load, detects the injected regression |
+
+Min-of-N picks the sample that ran uncontended, which exists in any 15-sample window
+even at 2x oversubscription; both sides of a ratio are sampled interleaved so a load
+burst hits both. Total cost 0.26 s.
+
+## 7. Repo layout
 
 ```
 BENCHarts/
@@ -545,7 +671,7 @@ BENCHarts/
     svg/
 ```
 
-## 7. Build order
+## 8. Build order
 
 Each phase is one reviewable change, tests written before the code. "Done" is the
 stated proof, not an opinion.
@@ -567,7 +693,7 @@ stated proof, not an opinion.
 
 P1, P2 and P3 are independent after P0. P5, P6 and P7 are independent after P4.
 
-## 8. Open questions
+## 9. Open questions
 
 ### Blocking
 
