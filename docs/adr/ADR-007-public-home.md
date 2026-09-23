@@ -35,7 +35,29 @@ Four facts I measured before doing it:
 `github.com/spdrman/BENCHarts`, public, is the canonical repo and the only
 remote. No mirror, no dual push.
 
-The package publishes as `bencharts`, unscoped.
+The package publishes as `@spdrman/bencharts`.
+
+**Amended after the registry refused the unscoped name.** This decision first
+said `bencharts`, on the grounds that it was free and carried no project
+vocabulary. It was free to *reserve* and not free to *publish*: npm answered the
+publish with
+
+```
+403 Forbidden - PUT https://registry.npmjs.org/bencharts
+Package name too similar to existing packages bizcharts,echarts,recharts;
+try renaming your package to '@spdrman/bencharts'
+```
+
+A 404 on the registry means nobody holds the name. It does not mean the name can
+be published, because npm's typosquatting check runs at publish time and reads
+the whole namespace rather than one entry. I checked availability the only way
+that looked available and the check I ran could not have caught this.
+
+The scope npm suggested is the one this ADR would have chosen next anyway: it
+matches the repo owner exactly and keeps the property the unscoped name was
+picked for, which was carrying no organisation's vocabulary. `@causl/bencharts`
+was the other candidate and is refused for the reason in the alternatives below,
+which the refusal does not change.
 
 R-PROV-4 drops the hardcoded internal hostname in favour of the general
 hostname-like token rule, which already subsumes it and is a stronger check
@@ -63,14 +85,20 @@ action rather than a done thing.
   the source, which is the kind of small incoherence that costs somebody an hour
   two years from now. Rejected.
 - **`@spdrman/bencharts`.** Matches the owner exactly, and ties the package name
-  to a personal handle that a future transfer to an org would strand. Rejected.
+  to a personal handle that a future transfer to an org would strand. Rejected
+  at first, and **adopted** once the registry refused the unscoped name. The
+  transfer objection stands and is worth remembering: moving this to an org
+  later means a rename, and a rename after the first consumer pins it is not
+  free.
 
 ## Consequences
 
 - Positive: one remote, one credential, and R1 in `ARCHITECTURE.md` §6
   disappears rather than being mitigated.
-- Positive: the install line is `npm i bencharts` and carries no project
-  vocabulary at all, which is D4 applied to the package name.
+- Positive: the install line is `npm i @spdrman/bencharts` and carries no
+  project vocabulary, which is D4 applied to the package name. The scope names
+  the publisher, which is a fact about who ships it rather than a claim about
+  what it is for.
 - Positive: issues, releases and the publish all live somewhere a consumer can
   reach and file against, which the previous arrangement could not offer.
 - Negative: the source is public from the first commit, so §4's reproductions
