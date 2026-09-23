@@ -30,4 +30,15 @@ jobs:
             || { echo "types/ is stale: run npx tsc and commit the result"; exit 1; }
 
       - name: The packed tarball is exactly the allowlist
-        run: npm pack --dry-run
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const pack = require("/tmp/pack.json")[0];
+            const allowed = /^(src\/|types\/|README\.md$|CHANGELOG\.md$|package\.json$)/;
+            const strays = pack.files.map((f) => f.path).filter((p) => !allowed.test(p));
+            if (strays.length) {
+              console.error("these would ship and should not:\n  " + strays.join("\n  "));
+              process.exit(1);
+            }
+            console.log(`${pack.files.length} files, all inside the allowlist`);
+          '
