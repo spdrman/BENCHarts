@@ -14,8 +14,13 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install the one dev dependency
-        run: npm install --no-audit --no-fund
+      # `npm ci` and an exact pin, not `npm install` and a caret: the committed
+      # declarations are compiler output, so the drift gate below is only
+      # meaningful if every run uses the same compiler. A caret let CI resolve a
+      # newer tsc that emits `target?: number` where 5.6.3 emits
+      # `target?: number | undefined`, and the gate fired on that alone.
+      - name: Install the one dev dependency, exactly
+        run: npm ci --no-audit --no-fund
 
       - name: Run the suite
         run: node --test
