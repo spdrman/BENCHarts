@@ -11,6 +11,15 @@ test('there is no dependencies key at all, not merely an empty one', () => {
   assert.ok(!('dependencies' in pkg), 'a runtime dependency is the thing this library promises not to have');
 });
 
+test('the package is licensed, so it can actually be installed and used', () => {
+  assert.equal(pkg.license, 'MIT');
+  assert.ok(existsSync(join(root, 'LICENSE')), 'an SPDX id with no LICENSE file is a claim, not a licence');
+  const text = readFileSync(join(root, 'LICENSE'), 'utf8');
+  assert.match(text, /^MIT License/);
+  assert.match(text, /Copyright \(c\) \d{4} Roman Goldmann/);
+  assert.ok(pkg.files.includes('LICENSE'), 'npm packs it regardless, so say so rather than rely on that');
+});
+
 test('the manifest ships an allowlist, never a denylist', () => {
   assert.ok(Array.isArray(pkg.files) && pkg.files.length > 0);
   assert.ok(!existsSync(join(root, '.npmignore')),

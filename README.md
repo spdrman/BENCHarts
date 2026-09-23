@@ -155,3 +155,7 @@ node tools/update-goldens.mjs
 Types are JSDoc on the source with the declarations generated, so a declaration
 cannot claim a signature the function does not have. There is no build step: the
 files that ship are the files in `src/`.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

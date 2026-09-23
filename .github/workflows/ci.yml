@@ -39,7 +39,7 @@ jobs:
           npm pack --dry-run --json > /tmp/pack.json
           node -e '
             const pack = require("/tmp/pack.json")[0];
-            const allowed = /^(src\/|types\/|README\.md$|CHANGELOG\.md$|package\.json$)/;
+            const allowed = /^(src\/|types\/|README\.md$|CHANGELOG\.md$|LICENSE$|package\.json$)/;
             const strays = pack.files.map((f) => f.path).filter((p) => !allowed.test(p));
             if (strays.length) {
               console.error("these would ship and should not:\n  " + strays.join("\n  "));
