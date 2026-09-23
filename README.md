@@ -4,7 +4,7 @@ Benchmark results as SVG. A library of pure functions: records in, a
 deterministic string out. No DOM, no canvas, no async, no runtime dependencies.
 
 ```
-npm i bencharts
+npm i @spdrman/bencharts
 ```
 
 Three chart families: **grouped bars** (one column group per benchmark config,
@@ -32,7 +32,7 @@ throws.
 ## Grouped bars
 
 ```js
-import { defineSeries, renderGroupedBars } from 'bencharts';
+import { defineSeries, renderGroupedBars } from '@spdrman/bencharts';
 import { writeFileSync } from 'node:fs';
 
 const series = defineSeries([
@@ -66,7 +66,7 @@ accessor.
 ## Sweep
 
 ```js
-import { defineSeries, renderSweep, scanForDisclosure } from 'bencharts';
+import { defineSeries, renderSweep, scanForDisclosure } from '@spdrman/bencharts';
 
 const series = defineSeries([
   { key: 'alpha', label: 'Alpha' },
