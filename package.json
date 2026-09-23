@@ -1,5 +1,5 @@
 {
-  "name": "bencharts",
+  "name": "@spdrman/bencharts",
   "version": "0.1.0",
   "description": "Benchmark results as SVG. Records in, a deterministic string out.",
   "keywords": [
