@@ -96,6 +96,18 @@ export function legendMarkup(layout: ReturnType<typeof layoutLegend>, originX: n
  */
 export function niceTicks(max: number, target?: number | undefined): number[];
 /**
+ * Ticks for an axis that has to hold both signs, anchored on zero.
+ *
+ * A bar axis is always anchored at zero, which is not the same as saying the
+ * data cannot go below it. A linear axis represents a negative perfectly well,
+ * unlike a log axis, so refusing one here would be an invented limitation.
+ *
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number[]}
+ */
+export function signedTicks(lo: number, hi: number): number[];
+/**
  * Snap a domain out to 1-2-5 bounds rather than to the enclosing decade.
  *
  * A sweep holding four lines between 2200 and 4500 on an axis stretched to
