@@ -216,6 +216,31 @@ export function niceTicks(max, target = 4) {
 }
 
 /**
+ * Ticks for an axis that has to hold both signs, anchored on zero.
+ *
+ * A bar axis is always anchored at zero, which is not the same as saying the
+ * data cannot go below it. A linear axis represents a negative perfectly well,
+ * unlike a log axis, so refusing one here would be an invented limitation.
+ *
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number[]}
+ */
+export function signedTicks(lo, hi) {
+  const low = Number.isFinite(lo) ? Math.min(0, lo) : 0;
+  const high = Number.isFinite(hi) ? Math.max(0, hi) : 1;
+  if (high === low) return [0, 1];
+  const step = niceTicks(high - low)[1] || 1;
+  const first = Math.floor(low / step) * step;
+  const last = Math.ceil(high / step) * step;
+  const ticks = [];
+  for (let v = first, guard = 0; v <= last + step * 1e-9 && guard < 16; v += step, guard++) {
+    ticks.push(Number.parseFloat(v.toPrecision(12)));
+  }
+  return ticks.length >= 2 ? ticks : [low, high];
+}
+
+/**
  * Snap a domain out to 1-2-5 bounds rather than to the enclosing decade.
  *
  * A sweep holding four lines between 2200 and 4500 on an axis stretched to

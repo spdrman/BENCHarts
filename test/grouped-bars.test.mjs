@@ -121,6 +121,81 @@ test('every value is labelled up to twelve bars, and past that only best and wor
   assert.equal((svg.match(/class="bc-value"/g) || []).length, 16 > 12 ? 16 : 16);
 });
 
+const barsIn = (svg) => [...svg.matchAll(/class="bc-bar" d="M([-\d.]+),([-\d.]+)L[-\d.]+,([-\d.]+)/g)]
+  .map((m) => ({ x: Number(m[1]), baseline: Number(m[2]), end: Number(m[3]) }));
+const box = (svg) => {
+  const m = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
+  return { width: Number(m[1]), height: Number(m[2]) };
+};
+const yTicks = (svg) => [...svg.matchAll(/text-anchor="end" font-size="9"[^>]*>([^<]+)</g)].map((m) => Number(m[1]));
+
+/* The squeeze that fits content to a forced width has a floor, and past that it
+ * stops squeezing and runs the bars off the right edge instead. A chart that
+ * looks finished and is not is the one outcome D2 rules out. */
+test('a canvas too narrow for the content is refused, not silently overflowed', () => {
+  const rows = Array.from({ length: 200 }, (_, i) => row(`g${i}`, 'directory', i + 1));
+  throwsCode(() => renderGroupedBars(rows, { series, width: 200 }), 'INVALID_OPTION');
+});
+
+test('and the width the refusal names actually works, rather than refusing again', () => {
+  for (const n of [200, 800]) {
+    const rows = Array.from({ length: n }, (_, i) => row(`g${i}`, 'directory', i + 1));
+    let needed = null;
+    try { renderGroupedBars(rows, { series, width: 120 }); } catch (e) { needed = e.details.needed; }
+    assert.ok(Number.isInteger(needed), `no needed width reported for ${n} groups`);
+    assert.doesNotThrow(() => renderGroupedBars(rows, { series, width: needed }),
+      `${n} groups: told ${needed} and refused it`);
+  }
+});
+
+test('every bar stays inside the canvas at any width it accepts', () => {
+  for (const [n, w] of [[10, 300], [50, 300], [200, 700], [4, 900]]) {
+    const rows = Array.from({ length: n }, (_, i) => row(`g${i}`, 'directory', i + 1));
+    const svg = renderGroupedBars(rows, { series, width: w });
+    const bars = barsIn(svg);
+    assert.equal(bars.length, n);
+    assert.ok(Math.min(...bars.map((b) => b.x)) >= 0, `${n}@${w} runs off the left`);
+    assert.ok(Math.max(...bars.map((b) => b.x)) <= w, `${n}@${w} runs off the right`);
+  }
+});
+
+/* A linear axis represents a negative perfectly well, unlike a log axis, so a
+ * bar that grows downward is drawn rather than refused. It used to be drawn
+ * below the baseline and clean off the canvas. */
+test('a negative value grows down from zero and stays on the canvas', () => {
+  const svg = renderGroupedBars([row('down', 'directory', -5), row('up', 'directory', 10)], { series });
+  const { height } = box(svg);
+  const bars = barsIn(svg);
+  assert.equal(bars.length, 2);
+  for (const b of bars) {
+    assert.ok(b.end >= 0 && b.end <= height, `data end ${b.end} is off a canvas of ${height}`);
+  }
+  assert.ok(bars[0].end > bars[0].baseline, 'the negative grows down');
+  assert.ok(bars[1].end < bars[1].baseline, 'the positive grows up');
+  assert.equal(bars[0].baseline, bars[1].baseline, 'both anchor on the same zero');
+  assert.ok(yTicks(svg).includes(0), 'zero stays on the axis');
+  assert.ok(Math.min(...yTicks(svg)) < 0, 'and the axis reaches below it');
+  assert.ok(!/NaN/.test(svg));
+});
+
+test('all-negative data gets an axis, rather than one that stops at zero', () => {
+  const svg = renderGroupedBars([row('a', 'directory', -5), row('b', 'directory', -2)], { series });
+  assert.ok(Math.min(...yTicks(svg)) <= -5);
+  assert.ok(yTicks(svg).includes(0));
+  assert.equal((svg.match(/class="bc-bar"/g) || []).length, 2);
+});
+
+test('all-positive data still starts the axis at zero', () => {
+  assert.equal(Math.min(...yTicks(renderGroupedBars(basic, { series }))), 0);
+});
+
+test('a whisker on a negative value stays inside the domain', () => {
+  const svg = renderGroupedBars([row('a', 'directory', -5, 3), row('b', 'directory', 10, 2)], { series });
+  assert.ok(svg.includes('class="bc-whisker"'));
+  assert.ok(!/NaN/.test(svg));
+  assert.ok(!/-?\d+e[-+]\d+/.test(svg), 'no exponent reaches a coordinate');
+});
+
 test('S1: a hostile group name is escaped into the text node, never a breakout', () => {
   const rows = [row('a"/><script>PWNED</script><text x="1', 'directory', 5)];
   const svg = renderGroupedBars(rows, { series });

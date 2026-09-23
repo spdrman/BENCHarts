@@ -10,7 +10,7 @@ import { escapeXml, formatCoord, formatNumber } from '../format.js';
 import { isSeriesSet } from '../series.js';
 import { validateOptions, checkBarRows } from '../validate.js';
 import {
-  svgDocument, layoutLegend, legendMarkup, niceTicks, estimateTextWidth,
+  svgDocument, layoutLegend, legendMarkup, signedTicks, estimateTextWidth,
   LEGEND_ROW_HEIGHT, INK_VAR,
 } from '../svg.js';
 
@@ -34,6 +34,8 @@ const PAD_R = 20;
 const PAD_B = 44;
 const PLOT_H = 200;
 const LABEL_ALL_UP_TO = 12;
+/** Below this a bar is not a mark, so a canvas that cannot give it is refused. */
+const MIN_BAR_W = 1;
 
 /**
  * @typedef {object} GroupedBarsOptions
@@ -75,8 +77,11 @@ export function renderGroupedBars(rows, opts = {}) {
       { records: data.rows.length });
   }
   const drewWhiskers = data.rows.some((r) => typeof r.error === 'number' && r.error > 0);
-  const ticks = niceTicks(Math.max(...values, ...data.rows.map((r) =>
-    (Number.isFinite(r.value) && typeof r.error === 'number' ? r.value + r.error : Number.NEGATIVE_INFINITY))));
+  const reach = data.rows.flatMap((r) => (Number.isFinite(r.value)
+    ? (typeof r.error === 'number' ? [r.value - r.error, r.value + r.error] : [r.value])
+    : []));
+  const ticks = signedTicks(Math.min(...reach), Math.max(...reach));
+  const yMin = ticks[0];
   const yMax = ticks[ticks.length - 1];
 
   // Content-sized unless the caller fixes it, and squeezed to fit when they do.
@@ -88,10 +93,24 @@ export function renderGroupedBars(rows, opts = {}) {
   const width = o.width ?? PAD_L + Math.max(160, naturalContent) + PAD_R;
   const available = width - PAD_L - PAD_R;
   const squeeze = naturalContent > available ? available / naturalContent : 1;
-  const barW = Math.max(1, BAR_W * squeeze);
+  const barW = Math.max(MIN_BAR_W, BAR_W * squeeze);
   const barGap = BAR_GAP * squeeze;
   const groupGap = GROUP_GAP * squeeze;
   const groupW = present.length * barW + Math.max(0, present.length - 1) * barGap;
+  // The squeeze has a floor, so past a point it stops squeezing and the bars
+  // run off the right edge instead. That is a chart that looks finished and is
+  // not, which is the one outcome D2 exists to rule out.
+  const laidOut = groups.length * groupW + Math.max(0, groups.length - 1) * groupGap;
+  if (laidOut > available + 1e-9) {
+    // The width at which the natural squeeze lands exactly on the floor. Left
+    // as groups x series x MIN_BAR_W it ignores the gaps, and then a caller who
+    // passes the number they were given is refused again.
+    const needed = Math.ceil(PAD_L + PAD_R + naturalContent * (MIN_BAR_W / BAR_W));
+    fail(ERROR_CODES.INVALID_OPTION,
+      `width ${width} cannot hold ${groups.length} groups of ${present.length} series at a legible bar width; `
+      + `it needs at least ${needed}, or leave width off and let the canvas size itself`,
+      { option: 'width', given: width, needed, groups: groups.length, series: present.length });
+  }
 
   const subtitleParts = [];
   if (unit) subtitleParts.push(unit);
@@ -109,7 +128,9 @@ export function renderGroupedBars(rows, opts = {}) {
   const height = o.height ?? plotTop + PLOT_H + PAD_B;
   const plotBottom = height - PAD_B;
   const plotH = Math.max(1, plotBottom - plotTop);
-  const y = (/** @type {number} */ v) => plotBottom - (v / yMax) * plotH;
+  const span = yMax - yMin || 1;
+  const y = (/** @type {number} */ v) => plotBottom - ((v - yMin) / span) * plotH;
+  const baseline = y(0);
 
   const parts = [];
   if (title) {
@@ -156,27 +177,31 @@ export function renderGroupedBars(rows, opts = {}) {
       if (record === undefined || !Number.isFinite(record.value)) {
         // Absent and unmeasurable both keep the slot and say so. "Not
         // benchmarked" must never read as "0".
-        parts.push(`<text class="bc-absent" x="${formatCoord(mid)}" y="${formatCoord(plotBottom - 4)}"`
+        parts.push(`<text class="bc-absent" x="${formatCoord(mid)}" y="${formatCoord(baseline - 4)}"`
           + ` text-anchor="middle" font-size="9" fill="${INK_VAR.muted}">n/a</text>`);
         return;
       }
 
       const value = record.value;
-      const top = value === 0 ? plotBottom - 2 : y(value);
-      const h = Math.max(2, plotBottom - top);
-      const r = Math.min(4, barW / 2, h);
-      // Rounded at the data end, square at the baseline, so the bar reads as
-      // growing from the axis rather than floating.
-      parts.push(`<path class="bc-bar" d="M${formatCoord(x)},${formatCoord(plotBottom)}`
-        + `L${formatCoord(x)},${formatCoord(top + r)}`
-        + `Q${formatCoord(x)},${formatCoord(top)} ${formatCoord(x + r)},${formatCoord(top)}`
-        + `L${formatCoord(x + barW - r)},${formatCoord(top)}`
-        + `Q${formatCoord(x + barW)},${formatCoord(top)} ${formatCoord(x + barW)},${formatCoord(top + r)}`
-        + `L${formatCoord(x + barW)},${formatCoord(plotBottom)}Z" fill="${escapeXml(colour)}"/>`);
+      const down = value < 0;
+      // A measured zero is a 2px stub rather than nothing, so it cannot be
+      // mistaken for the absent cell three lines above.
+      const end = value === 0 ? baseline - 2 : y(value);
+      const h = Math.abs(baseline - end);
+      const r = Math.min(4, barW / 2, Math.max(0, h));
+      // Rounded at the data end and square at the baseline, whichever way the
+      // bar grows, so it reads as coming from the axis rather than floating.
+      const sign = down ? -1 : 1;
+      parts.push(`<path class="bc-bar" d="M${formatCoord(x)},${formatCoord(baseline)}`
+        + `L${formatCoord(x)},${formatCoord(end + r * sign)}`
+        + `Q${formatCoord(x)},${formatCoord(end)} ${formatCoord(x + r)},${formatCoord(end)}`
+        + `L${formatCoord(x + barW - r)},${formatCoord(end)}`
+        + `Q${formatCoord(x + barW)},${formatCoord(end)} ${formatCoord(x + barW)},${formatCoord(end + r * sign)}`
+        + `L${formatCoord(x + barW)},${formatCoord(baseline)}Z" fill="${escapeXml(colour)}"/>`);
 
       if (typeof record.error === 'number' && record.error > 0) {
         const hi = y(Math.min(yMax, value + record.error));
-        const lo = y(Math.max(0, value - record.error));
+        const lo = y(Math.max(yMin, value - record.error));
         const cap = Math.max(2, barW / 3);
         parts.push(`<g class="bc-whisker" stroke="${INK_VAR.primary}" stroke-width="1">`
           + `<line x1="${formatCoord(mid)}" y1="${formatCoord(hi)}" x2="${formatCoord(mid)}" y2="${formatCoord(lo)}"/>`
@@ -186,7 +211,7 @@ export function renderGroupedBars(rows, opts = {}) {
       }
 
       if (labelled.has(key)) {
-        parts.push(`<text class="bc-value" x="${formatCoord(mid)}" y="${formatCoord(top - 4)}"`
+        parts.push(`<text class="bc-value" x="${formatCoord(mid)}" y="${formatCoord(down ? end + 11 : end - 4)}"`
           + ` text-anchor="middle" font-size="9" fill="${INK_VAR.secondary}">${escapeXml(formatNumber(value))}</text>`);
       }
     });
