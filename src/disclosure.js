@@ -15,6 +15,7 @@
 /** Hosts that appear in every chart by specification, not by leak. */
 const NAMESPACE_HOSTS = new Set(['www.w3.org', 'w3.org']);
 
+/** @type {ReadonlyArray<readonly [string, RegExp]>} */
 const RULES = [
   ['posix-home', /\/(?:Users|home)\/[A-Za-z0-9._-]+/g],
   ['windows-path', /[A-Za-z]:\\(?:[^\\\s"<>]+\\?)+/g],
@@ -40,6 +41,7 @@ export function scanForDisclosure(svg) {
   const found = [];
   for (const [rule, pattern] of RULES) {
     pattern.lastIndex = 0;
+    /** @type {RegExpExecArray | null} */
     let m;
     while ((m = pattern.exec(text)) !== null) {
       // A gate that cries wolf gets switched off, so the two constants every

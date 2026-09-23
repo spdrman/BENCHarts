@@ -8,7 +8,7 @@
 import { ERROR_CODES, fail } from '../error.js';
 import { escapeXml, formatCoord, formatNumber } from '../format.js';
 import { isSeriesSet } from '../series.js';
-import { validateOptions, validateRecords } from '../validate.js';
+import { validateOptions, checkBarRows } from '../validate.js';
 import {
   svgDocument, layoutLegend, legendMarkup, niceTicks, estimateTextWidth,
   LEGEND_ROW_HEIGHT, INK_VAR,
@@ -36,20 +36,34 @@ const PLOT_H = 200;
 const LABEL_ALL_UP_TO = 12;
 
 /**
- * @param {readonly {group: string, series: string, value: number, error?: number}[]} rows
- * @param {object} [opts]
+ * @typedef {object} GroupedBarsOptions
+ * @property {import('../series.js').SeriesSet} series
+ * @property {string} [title]
+ * @property {string} [unit]
+ * @property {'lower'|'higher'} [better]
+ * @property {number} [width]
+ * @property {number} [height]
+ * @property {'auto'|'light'|'dark'} [theme]
+ * @property {'opaque'|'transparent'} [surface]
+ * @property {string} [errorLabel]
+ */
+
+/**
+ * @param {unknown} rows
+ * @param {Partial<GroupedBarsOptions>} [opts]
  * @returns {string}
  */
 export function renderGroupedBars(rows, opts = {}) {
   validateOptions(/** @type {any} */ (opts), ALLOWED);
-  const { series, title, unit, better, errorLabel, theme, surface } = /** @type {any} */ (opts);
+  const o = /** @type {GroupedBarsOptions} */ (opts);
+  const { series, title, unit, better, errorLabel, theme, surface } = o;
   if (!isSeriesSet(series)) {
     fail(ERROR_CODES.INVALID_OPTION,
       'series must be the SeriesSet defineSeries returned, checked by brand rather than by shape',
       { option: 'series' });
   }
 
-  const data = validateRecords(rows, 'bar');
+  const data = checkBarRows(rows);
   const resolved = series.resolve(data.seriesKeys);
   const groups = data.axisValues;
   const present = resolved.present;
@@ -62,7 +76,7 @@ export function renderGroupedBars(rows, opts = {}) {
   }
   const drewWhiskers = data.rows.some((r) => typeof r.error === 'number' && r.error > 0);
   const ticks = niceTicks(Math.max(...values, ...data.rows.map((r) =>
-    Number.isFinite(r.value) && typeof r.error === 'number' ? r.value + r.error : Number.NEGATIVE_INFINITY)));
+    (Number.isFinite(r.value) && typeof r.error === 'number' ? r.value + r.error : Number.NEGATIVE_INFINITY))));
   const yMax = ticks[ticks.length - 1];
 
   // Content-sized unless the caller fixes it, and squeezed to fit when they do.
@@ -71,7 +85,7 @@ export function renderGroupedBars(rows, opts = {}) {
   // Floor the plot region, not the whole canvas: a floor on the total masks
   // content sizing entirely until the content outgrows it, which is most small
   // charts.
-  const width = opts.width ?? PAD_L + Math.max(160, naturalContent) + PAD_R;
+  const width = o.width ?? PAD_L + Math.max(160, naturalContent) + PAD_R;
   const available = width - PAD_L - PAD_R;
   const squeeze = naturalContent > available ? available / naturalContent : 1;
   const barW = Math.max(1, BAR_W * squeeze);
@@ -87,12 +101,12 @@ export function renderGroupedBars(rows, opts = {}) {
 
   const headerH = (title ? 24 : 4) + (subtitle ? 16 : 0);
   const legend = layoutLegend(
-    present.map((key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
+    present.map((/** @type {string} */ key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
     available, 11,
   );
   const legendY = headerH + 2;
   const plotTop = legendY + legend.height + 10;
-  const height = opts.height ?? plotTop + PLOT_H + PAD_B;
+  const height = o.height ?? plotTop + PLOT_H + PAD_B;
   const plotBottom = height - PAD_B;
   const plotH = Math.max(1, plotBottom - plotTop);
   const y = (/** @type {number} */ v) => plotBottom - (v / yMax) * plotH;
@@ -121,15 +135,18 @@ export function renderGroupedBars(rows, opts = {}) {
     const gx = PAD_L + gi * (groupW + groupGap);
     const bySeries = data.index.get(group);
     const finite = present
-      .map((key) => ({ key, row: bySeries?.get(key) !== undefined ? data.rows[bySeries.get(key)] : undefined }))
-      .filter((c) => c.row && Number.isFinite(c.row.value));
+      .map((/** @type {string} */ key) => {
+        const at = bySeries?.get(key);
+        return { key, row: at === undefined ? undefined : data.rows[at] };
+      })
+      .filter((c) => c.row !== undefined && Number.isFinite(c.row.value));
     let labelled = new Set(present);
     if (totalCells > LABEL_ALL_UP_TO && finite.length > 0) {
-      const sorted = [...finite].sort((a, b) => a.row.value - b.row.value);
+      const sorted = [...finite].sort((a, b) => Number(a.row?.value) - Number(b.row?.value));
       labelled = new Set([sorted[0].key, sorted[sorted.length - 1].key]);
     }
 
-    present.forEach((key, si) => {
+    present.forEach((/** @type {string} */ key, /** @type {number} */ si) => {
       const x = gx + si * (barW + barGap);
       const mid = x + barW / 2;
       const hit = bySeries?.get(key);
@@ -176,10 +193,12 @@ export function renderGroupedBars(rows, opts = {}) {
 
     const label = String(group);
     const fits = estimateTextWidth(label, 10) <= groupW + groupGap;
-    parts.push(`<text x="${formatCoord(gx + groupW / 2)}" y="${formatCoord(plotBottom + 16)}"`
-      + ` text-anchor="middle" font-size="10" fill="${INK_VAR.secondary}"`
-      + `${fits ? '' : ` transform="rotate(-30 ${formatCoord(gx + groupW / 2)} ${formatCoord(plotBottom + 16)})"`}`
-      + `>${escapeXml(label)}</text>`);
+    // Two flat templates rather than one with a nested template inside it, so
+    // the R-ESC-1 scanner can read every interpolation here without recursing.
+    const head = `<text x="${formatCoord(gx + groupW / 2)}" y="${formatCoord(plotBottom + 16)}"`
+      + ` text-anchor="middle" font-size="10" fill="${INK_VAR.secondary}"`;
+    const rotate = ` transform="rotate(-30 ${formatCoord(gx + groupW / 2)} ${formatCoord(plotBottom + 16)})"`;
+    parts.push(`${head}${fits ? '' : rotate}>${escapeXml(label)}</text>`);
   });
 
   return svgDocument({ width, height, body: parts.join(''), theme, surface });

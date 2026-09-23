@@ -8,10 +8,10 @@
 import { ERROR_CODES, fail } from '../error.js';
 import { escapeXml, formatCoord, formatNumber } from '../format.js';
 import { isSeriesSet } from '../series.js';
-import { validateOptions, validateRecords } from '../validate.js';
+import { validateOptions, checkTrendPoints } from '../validate.js';
 import { linearScale } from '../scale.js';
 import {
-  svgDocument, layoutLegend, legendMarkup, niceTicks, INK_VAR,
+  svgDocument, layoutLegend, legendMarkup, niceTicks, pointsAttr, INK_VAR,
 } from '../svg.js';
 
 const ALLOWED = {
@@ -31,21 +31,35 @@ const PAD_B = 44;
 const PLOT_H = 220;
 
 /**
- * @param {readonly {step: number, series: string, value: number, label?: string}[]} points
- * @param {object} [opts]
+ * @typedef {object} TrendOptions
+ * @property {import('../series.js').SeriesSet} series
+ * @property {string} [title]
+ * @property {string} [unit]
+ * @property {'lower'|'higher'} [better]
+ * @property {number} [width]
+ * @property {number} [height]
+ * @property {'auto'|'light'|'dark'} [theme]
+ * @property {'opaque'|'transparent'} [surface]
+ */
+
+/**
+ * @param {unknown} points
+ * @param {Partial<TrendOptions>} [opts]
  * @returns {string}
  */
 export function renderTrend(points, opts = {}) {
   validateOptions(/** @type {any} */ (opts), ALLOWED);
-  const { series, title, unit, better, theme, surface } = /** @type {any} */ (opts);
+  const o = /** @type {TrendOptions} */ (opts);
+  const { series, title, unit, better, theme, surface } = o;
   if (!isSeriesSet(series)) {
     fail(ERROR_CODES.INVALID_OPTION,
       'series must be the SeriesSet defineSeries returned', { option: 'series' });
   }
 
-  const data = validateRecords(points, 'trend');
+  const data = checkTrendPoints(points);
   const resolved = series.resolve(data.seriesKeys);
-  const steps = [...data.axisValues].sort((a, b) => /** @type {number} */ (a) - /** @type {number} */ (b));
+  /** @type {number[]} */
+  const steps = [...data.axisValues].sort((a, b) => Number(a) - Number(b));
   const present = resolved.present;
 
   const values = data.rows.map((r) => r.value).filter((v) => Number.isFinite(v));
@@ -68,7 +82,7 @@ export function renderTrend(points, opts = {}) {
   const yLo = Math.floor((lo - pad) / tickStep) * tickStep;
   const yHi = Math.ceil((hi + pad) / tickStep) * tickStep;
 
-  const width = opts.width ?? Math.max(420, PAD_L + steps.length * 90 + PAD_R);
+  const width = o.width ?? Math.max(420, PAD_L + steps.length * 90 + PAD_R);
   const available = width - PAD_L - PAD_R;
   const subtitleParts = ['y axis is not zero-based'];
   if (unit) subtitleParts.unshift(unit);
@@ -77,19 +91,18 @@ export function renderTrend(points, opts = {}) {
 
   const headerH = (title ? 24 : 4) + 16;
   const legend = layoutLegend(
-    present.map((key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
+    present.map((/** @type {string} */ key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
     available, 11,
   );
   const legendY = headerH + 2;
   const plotTop = legendY + legend.height + 10;
-  const height = opts.height ?? plotTop + PLOT_H + PAD_B;
+  const height = o.height ?? plotTop + PLOT_H + PAD_B;
   const plotBottom = height - PAD_B;
 
   const y = linearScale(yLo, yHi, plotBottom, plotTop);
   const x = steps.length === 1
     ? () => PAD_L + available / 2
-    : linearScale(/** @type {number} */ (steps[0]), /** @type {number} */ (steps[steps.length - 1]),
-      PAD_L, PAD_L + available);
+    : linearScale(steps[0], steps[steps.length - 1], PAD_L, PAD_L + available);
 
   const parts = [];
   if (title) {
@@ -113,23 +126,23 @@ export function renderTrend(points, opts = {}) {
   // A step where nothing at all was measured must not break every line: that
   // shatters the chart into single points. A step where SOME series reported is
   // a genuine gap for the ones that did not.
-  const measured = new Set(steps.filter((s) => {
+  const measured = new Set(steps.filter((/** @type {number} */ s) => {
     const bySeries = data.index.get(s);
-    return present.some((k) => {
-      const i = bySeries?.get(k);
-      return i !== undefined && Number.isFinite(data.rows[i].value);
+    return present.some((/** @type {string} */ k) => {
+      const at = bySeries?.get(k);
+      return at !== undefined && Number.isFinite(data.rows[at].value);
     });
   }));
 
   for (const key of present) {
     const colour = resolved.colorOf(key);
-    /** @type {string[][]} */ const segments = [];
-    let current = [];
+    /** @type {Array<Array<[number, number]>>} */ const segments = [];
+    /** @type {Array<[number, number]>} */ let current = [];
     for (const step of steps) {
-      const i = data.index.get(step)?.get(key);
-      const row = i === undefined ? undefined : data.rows[i];
+      const at = data.index.get(step)?.get(key);
+      const row = at === undefined ? undefined : data.rows[at];
       if (row && Number.isFinite(row.value)) {
-        current.push(`${formatCoord(x(/** @type {number} */ (step)))},${formatCoord(y(row.value))}`);
+        current.push([x(step), y(row.value)]);
       } else if (measured.has(step)) {
         if (current.length) segments.push(current);
         current = [];
@@ -139,18 +152,18 @@ export function renderTrend(points, opts = {}) {
 
     for (const segment of segments) {
       if (segment.length === 1) {
-        const [cx, cy] = segment[0].split(',');
-        parts.push(`<circle class="bc-dot" cx="${cx}" cy="${cy}" r="3" fill="${escapeXml(colour)}"/>`);
+        parts.push(`<circle class="bc-dot" cx="${formatCoord(segment[0][0])}" cy="${formatCoord(segment[0][1])}"`
+          + ` r="3" fill="${escapeXml(colour)}"/>`);
       } else {
-        parts.push(`<polyline class="bc-line" points="${segment.join(' ')}" fill="none"`
+        parts.push(`<polyline class="bc-line" points="${pointsAttr(segment)}" fill="none"`
           + ` stroke="${escapeXml(colour)}" stroke-width="2" stroke-linejoin="round"/>`);
       }
     }
   }
 
   for (const step of steps) {
-    const label = data.stepLabels.get(/** @type {number} */ (step)) ?? String(step);
-    parts.push(`<text class="bc-xtick" x="${formatCoord(x(/** @type {number} */ (step)))}"`
+    const label = data.stepLabels.get(step) ?? String(step);
+    parts.push(`<text class="bc-xtick" x="${formatCoord(x(step))}"`
       + ` y="${formatCoord(plotBottom + 16)}" text-anchor="middle" font-size="9"`
       + ` fill="${INK_VAR.muted}">${escapeXml(label)}</text>`);
   }

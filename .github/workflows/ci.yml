@@ -13,7 +13,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Install the one dev dependency
+        run: npm install --no-audit --no-fund
+
       - name: Run the suite
         run: node --test
+
+      - name: The types check against the code
+        run: npx tsc --noEmit
+
+      - name: The committed declarations are current
+        run: |
+          npx tsc
+          git diff --exit-code -- types/ \
+            || { echo "types/ is stale: run npx tsc and commit the result"; exit 1; }
+
       - name: The packed tarball is exactly the allowlist
         run: npm pack --dry-run

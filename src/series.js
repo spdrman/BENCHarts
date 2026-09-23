@@ -25,6 +25,21 @@ const ALLOWED_OPTIONS = new Set(['fallbackColors']);
 /**
  * @typedef {{ key: string, label?: string, color?: string }} SeriesDef
  * @typedef {{ key: string, label: string, color: string }} ResolvedDef
+ *
+ * @typedef {object} ResolvedSeries
+ * @property {readonly string[]} keys declared order, then sorted undeclared
+ * @property {readonly string[]} present what the renderer actually draws
+ * @property {(key: string) => boolean} isDeclared
+ * @property {(key: string) => string} colorOf throws UNKNOWN_SERIES, never falls back
+ * @property {(key: string) => string} labelOf
+ *
+ * @typedef {object} SeriesSet
+ * @property {ReadonlyArray<Readonly<ResolvedDef>>} entries
+ * @property {readonly string[]} keys
+ * @property {(key: string) => boolean} has
+ * @property {(key: string) => string} colorOf
+ * @property {(key: string) => string} labelOf
+ * @property {(present: Iterable<string>) => ResolvedSeries} resolve
  */
 
 /**
@@ -66,7 +81,7 @@ function checkColor(c, where) {
  *
  * @param {readonly SeriesDef[]} defs
  * @param {{ fallbackColors?: readonly string[] }} [opts]
- * @returns {import('./series.js').SeriesSet}
+ * @returns {SeriesSet}
  */
 export function defineSeries(defs, opts = {}) {
   if (typeof opts !== 'object' || opts === null || Array.isArray(opts)) {
@@ -87,8 +102,8 @@ export function defineSeries(defs, opts = {}) {
   if (!Array.isArray(fallbacks)) {
     fail(ERROR_CODES.INVALID_SERIES_DEFINITION, 'fallbackColors must be an array', { got: show(fallbacks) });
   }
-  const seenFallback = new Set();
-  fallbacks.forEach((c, index) => {
+  /** @type {Set<string>} */ const seenFallback = new Set();
+  fallbacks.forEach((/** @type {string} */ c, /** @type {number} */ index) => {
     checkColor(c, { index, field: 'fallbackColors' });
     const norm = c.toLowerCase();
     if (seenFallback.has(norm)) {
@@ -158,7 +173,8 @@ export function defineSeries(defs, opts = {}) {
   const keys = Object.freeze(frozenEntries.map((e) => e.key));
   const declaredColors = new Set(frozenEntries.map((e) => e.color.toLowerCase()));
 
-  const set = {
+  /** @type {SeriesSet} */
+  const set = /** @type {any} */ ({
     [BRAND]: true,
     entries: frozenEntries,
     keys,
@@ -167,7 +183,7 @@ export function defineSeries(defs, opts = {}) {
     labelOf: (/** @type {string} */ key) => lookup(byKey, key).label,
     resolve: (/** @type {Iterable<string>} */ present) =>
       resolveAgainst(byKey, keys, declaredColors, fallbacks, present),
-  };
+  });
   return Object.freeze(set);
 }
 
@@ -182,8 +198,17 @@ function lookup(byKey, key) {
   return hit;
 }
 
+/**
+ * @param {Map<string, ResolvedDef>} byKey
+ * @param {readonly string[]} declaredKeys
+ * @param {Set<string>} declaredColors
+ * @param {readonly string[]} fallbacks
+ * @param {Iterable<string>} present
+ * @returns {ResolvedSeries}
+ */
 function resolveAgainst(byKey, declaredKeys, declaredColors, fallbacks, present) {
-  if (present === null || present === undefined || typeof present[Symbol.iterator] !== 'function') {
+  if (present === null || present === undefined
+    || typeof (/** @type {any} */ (present))[Symbol.iterator] !== 'function') {
     fail(ERROR_CODES.INVALID_INPUT, 'resolve needs an iterable of series keys', { got: show(present) });
   }
   const seen = new Set();
@@ -204,15 +229,18 @@ function resolveAgainst(byKey, declaredKeys, declaredColors, fallbacks, present)
       { needed: undeclared.length, available: usable.length, undeclared });
   }
 
-  const colors = new Map(byKey.entries().map(([k, e]) => [k, e.color]));
-  const labels = new Map(byKey.entries().map(([k, e]) => [k, e.label]));
+  /** @type {Map<string, string>} */
+  const colors = new Map([...byKey].map(([k, e]) => [k, e.color]));
+  /** @type {Map<string, string>} */
+  const labels = new Map([...byKey].map(([k, e]) => [k, e.label]));
   undeclared.forEach((key, i) => {
     colors.set(key, usable[i]);
     labels.set(key, key);
   });
 
   const keys = Object.freeze([...declaredKeys, ...undeclared]);
-  const resolved = {
+  /** @type {ResolvedSeries} */
+  const resolved = /** @type {any} */ ({
     [BRAND]: true,
     keys,
     present: Object.freeze(keys.filter((k) => seen.has(k))),
@@ -227,6 +255,6 @@ function resolveAgainst(byKey, declaredKeys, declaredColors, fallbacks, present)
       if (hit === undefined) fail(ERROR_CODES.UNKNOWN_SERIES, `no series named ${show(key)}`, { key });
       return hit;
     },
-  };
+  });
   return Object.freeze(resolved);
 }

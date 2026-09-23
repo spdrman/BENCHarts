@@ -57,7 +57,11 @@ export class BenchartsError extends Error {
     // cannot change what the thrown error reports.
     /** @type {Readonly<Record<string, unknown>>} */
     this.details = Object.freeze({ ...details });
-    if (Error.captureStackTrace) Error.captureStackTrace(this, BenchartsError);
+    // Present on V8, absent from the ES2022 lib types, so it is reached through
+    // a cast rather than by widening the whole lib.
+    const capture = /** @type {{ captureStackTrace?: (target: object, ctor: Function) => void }} */ (
+      /** @type {unknown} */ (Error)).captureStackTrace;
+    if (capture) capture(this, BenchartsError);
   }
 }
 

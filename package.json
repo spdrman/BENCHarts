@@ -2,7 +2,12 @@
   "name": "bencharts",
   "version": "0.1.0",
   "description": "Benchmark results as SVG. Records in, a deterministic string out.",
-  "keywords": ["benchmark", "chart", "svg", "deterministic"],
+  "keywords": [
+    "benchmark",
+    "chart",
+    "svg",
+    "deterministic"
+  ],
   "license": "UNLICENSED",
   "repository": {
     "type": "git",

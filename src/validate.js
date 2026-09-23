@@ -125,6 +125,26 @@ export function validateOptions(opts, allowed) {
   return opts;
 }
 
+/**
+ * @typedef {{ group: string, series: string, value: number, error?: number }} BarRow
+ * @typedef {{ step: number, series: string, value: number, label?: string }} TrendPoint
+ * @typedef {{ x: number, series: string, value: number }} SweepPoint
+ */
+
+/**
+ * What a checked record set looks like: the clean rows, the nested cell index,
+ * and the axis and series orders the renderer draws in.
+ *
+ * @template T
+ * @typedef {{
+ *   rows: T[],
+ *   index: Map<any, Map<string, number>>,
+ *   axisValues: any[],
+ *   seriesKeys: string[],
+ *   stepLabels: Map<number, string>,
+ * }} Checked
+ */
+
 /** One fixed record shape per family (D1). No accessors, no field pointers. */
 const FAMILIES = {
   bar: { axis: 'group', axisKind: 'string', extra: 'error' },
@@ -166,7 +186,7 @@ export function validateRecords(rows, family) {
   /** @type {unknown[]} */ const axisValues = [];
   /** @type {string[]} */ const seriesKeys = [];
   /** @type {Map<number, string>} */ const stepLabels = new Map();
-  const out = [];
+  /** @type {Array<Record<string, unknown>>} */ const out = [];
 
   rows.forEach((row, i) => {
     if (typeof row !== 'object' || row === null || Array.isArray(row)) {
@@ -263,4 +283,23 @@ export function validateRecords(rows, family) {
   });
 
   return { rows: out, index, axisValues, seriesKeys, stepLabels };
+}
+
+/* The three typed entry points. `validateRecords` is table-driven and cannot
+ * express "the shape depends on the family argument" in JSDoc, so the cast
+ * happens once per family here rather than at every use site. */
+
+/** @param {unknown} rows @returns {Checked<BarRow>} */
+export function checkBarRows(rows) {
+  return /** @type {any} */ (validateRecords(rows, 'bar'));
+}
+
+/** @param {unknown} points @returns {Checked<TrendPoint>} */
+export function checkTrendPoints(points) {
+  return /** @type {any} */ (validateRecords(points, 'trend'));
+}
+
+/** @param {unknown} points @returns {Checked<SweepPoint>} */
+export function checkSweepPoints(points) {
+  return /** @type {any} */ (validateRecords(points, 'sweep'));
 }

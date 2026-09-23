@@ -70,12 +70,10 @@ export function themeStyle(theme) {
 export function svgDocument({ width, height, body, theme = 'auto', surface = 'opaque' }) {
   validateDimension(width, 'width');
   validateDimension(height, 'height');
-  const w = formatCoord(width);
-  const h = formatCoord(height);
   const background = surface === 'transparent'
     ? ''
-    : `<rect class="bc-surface" x="0" y="0" width="${w}" height="${h}" fill="var(--${TOKENS.surface})"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="${escapeXml(FONT_STACK)}">`
+    : `<rect class="bc-surface" x="0" y="0" width="${formatCoord(width)}" height="${formatCoord(height)}" fill="var(--${TOKENS.surface})"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${formatCoord(width)} ${formatCoord(height)}" width="${formatCoord(width)}" height="${formatCoord(height)}" font-family="${escapeXml(FONT_STACK)}">`
     + `<style>${themeStyle(theme)}</style>`
     + background
     + body
@@ -167,13 +165,13 @@ export function layoutLegend(items, maxWidth, fontSize) {
  * @param {number} fontSize
  */
 export function legendMarkup(layout, originX, originY, fontSize) {
-  const parts = [];
+  /** @type {string[]} */ const parts = [];
   layout.rows.forEach((row, r) => {
     const y = originY + r * LEGEND_ROW_HEIGHT;
     for (const entry of row) {
       const sx = originX + entry.x;
       parts.push(
-        `<rect x="${formatCoord(sx)}" y="${formatCoord(y)}" width="${LEGEND_SWATCH}" height="${LEGEND_SWATCH}"`
+        `<rect x="${formatCoord(sx)}" y="${formatCoord(y)}" width="${formatCoord(LEGEND_SWATCH)}" height="${formatCoord(LEGEND_SWATCH)}"`
         + ` rx="2" fill="${escapeXml(entry.color)}"/>`
         + `<text x="${formatCoord(sx + LEGEND_SWATCH + SWATCH_TEXT_GAP)}" y="${formatCoord(y + LEGEND_SWATCH - 1)}"`
         + ` font-size="${formatCoord(fontSize)}" fill="var(--${TOKENS.secondary})">${escapeXml(entry.label)}</text>`,
@@ -244,6 +242,20 @@ export function snap125(min, max) {
   const l = down(lo);
   const h = up(hi);
   return [Number.isFinite(l) && l > 0 ? l : 1, Number.isFinite(h) && h > l ? h : l * 10];
+}
+
+/**
+ * Build a `points` attribute value from coordinate pairs.
+ *
+ * It exists so a family never holds pre-formatted geometry in a bare local: the
+ * R-ESC-1 scanner can see that every number in here went through formatCoord,
+ * and cannot see that about a variable called `pts`.
+ *
+ * @param {ReadonlyArray<[number, number]>} pairs
+ * @returns {string}
+ */
+export function pointsAttr(pairs) {
+  return pairs.map(([px, py]) => `${formatCoord(px)},${formatCoord(py)}`).join(' ');
 }
 
 /** Shared token names, so a family never spells one itself. */

@@ -8,10 +8,10 @@
 import { ERROR_CODES, fail } from '../error.js';
 import { escapeXml, formatCoord, formatLogTick, formatNumber } from '../format.js';
 import { isSeriesSet } from '../series.js';
-import { validateOptions, validateRecords } from '../validate.js';
+import { validateOptions, checkSweepPoints } from '../validate.js';
 import { log10Scale, linearScale, decadeTicks, isPlottableLog, isPlottable } from '../scale.js';
 import {
-  svgDocument, layoutLegend, legendMarkup, niceTicks, snap125, INK_VAR,
+  svgDocument, layoutLegend, legendMarkup, niceTicks, snap125, pointsAttr, INK_VAR,
 } from '../svg.js';
 
 const ALLOWED = {
@@ -36,20 +36,36 @@ const PLOT_H = 240;
 const MAX_TICKS = 12;
 
 /**
- * @param {readonly {x: number, series: string, value: number}[]} points
- * @param {object} [opts]
+ * @typedef {object} SweepOptions
+ * @property {import('../series.js').SeriesSet} series
+ * @property {string} [title]
+ * @property {string} [unit]
+ * @property {'lower'|'higher'} [better]
+ * @property {number} [width]
+ * @property {number} [height]
+ * @property {'auto'|'light'|'dark'} [theme]
+ * @property {'opaque'|'transparent'} [surface]
+ * @property {'log'|'linear'} [scale]
+ * @property {string} [xLabel]
+ * @property {string} [yLabel]
+ * @property {number} [xMin]
+ */
+
+/**
+ * @param {unknown} points
+ * @param {Partial<SweepOptions>} [opts]
  * @returns {string}
  */
 export function renderSweep(points, opts = {}) {
   validateOptions(/** @type {any} */ (opts), ALLOWED);
-  const { series, title, unit, better, scale = 'log', xLabel, yLabel, xMin, theme, surface } =
-    /** @type {any} */ (opts);
+  const o = /** @type {SweepOptions} */ (opts);
+  const { series, title, unit, better, scale = 'log', xLabel, yLabel, xMin, theme, surface } = o;
   if (!isSeriesSet(series)) {
     fail(ERROR_CODES.INVALID_OPTION,
       'series must be the SeriesSet defineSeries returned', { option: 'series' });
   }
 
-  const data = validateRecords(points, 'sweep');
+  const data = checkSweepPoints(points);
   const windowed = data.rows.filter((r) => (xMin === undefined ? true : r.x >= xMin));
   const logMode = scale === 'log';
   const plottableValue = (/** @type {number} */ v) => (logMode ? isPlottableLog(v) : isPlottable(v));
@@ -66,7 +82,7 @@ export function renderSweep(points, opts = {}) {
       { records: data.rows.length, windowed: windowed.length, xMin });
   }
 
-  const presentKeys = [];
+  /** @type {string[]} */ const presentKeys = [];
   for (const r of drawable) if (!presentKeys.includes(r.series)) presentKeys.push(r.series);
   const resolved = series.resolve(presentKeys);
   const present = resolved.present;
@@ -76,7 +92,7 @@ export function renderSweep(points, opts = {}) {
   const [xLo, xHi] = logMode ? snap125(Math.min(...xs), Math.max(...xs)) : [Math.min(...xs), Math.max(...xs)];
   const [yLo, yHi] = logMode ? snap125(Math.min(...vs), Math.max(...vs)) : [0, Math.max(...vs)];
 
-  const width = opts.width ?? 720;
+  const width = o.width ?? 720;
   const available = width - PAD_L - PAD_R;
   const subtitleParts = [];
   if (unit) subtitleParts.push(unit);
@@ -88,12 +104,12 @@ export function renderSweep(points, opts = {}) {
 
   const headerH = (title ? 24 : 4) + (subtitle ? 16 : 0);
   const legend = layoutLegend(
-    present.map((key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
+    present.map((/** @type {string} */ key) => ({ key, label: resolved.labelOf(key), color: resolved.colorOf(key) })),
     available, 11,
   );
   const legendY = headerH + 2;
   const plotTop = legendY + legend.height + 10;
-  const height = opts.height ?? plotTop + PLOT_H + PAD_B;
+  const height = o.height ?? plotTop + PLOT_H + PAD_B;
   const plotBottom = height - PAD_B;
 
   const x = logMode ? log10Scale(xLo, xHi, PAD_L, PAD_L + available) : linearScale(xLo, xHi, PAD_L, PAD_L + available);
@@ -133,8 +149,8 @@ export function renderSweep(points, opts = {}) {
       parts.push(`<circle class="bc-dot" cx="${formatCoord(x(line[0].x))}" cy="${formatCoord(y(line[0].value))}"`
         + ` r="3" fill="${escapeXml(colour)}"/>`);
     } else if (line.length > 1) {
-      const pts = line.map((r) => `${formatCoord(x(r.x))},${formatCoord(y(r.value))}`).join(' ');
-      parts.push(`<polyline class="bc-line" points="${pts}" fill="none" stroke="${escapeXml(colour)}"`
+      parts.push('<polyline class="bc-line" points="'
+        + `${pointsAttr(line.map((r) => [x(r.x), y(r.value)]))}" fill="none" stroke="${escapeXml(colour)}"`
         + ' stroke-width="2" stroke-linejoin="round"/>');
     }
     for (const r of omitted.filter((o) => o.series === key)) {
@@ -165,10 +181,11 @@ export function renderSweep(points, opts = {}) {
  * failure as stretching 2200..4500 out to 1000..10000: the reader loses the
  * scale. 1-2-5 ticks inside the snapped bounds keep it.
  */
+/** @param {number} lo @param {number} hi @returns {number[]} */
 function logTicks(lo, hi) {
   const major = decadeTicks(lo, hi).major;
   if (major.length >= 2) return thin(major);
-  const out = [];
+  /** @type {number[]} */ const out = [];
   const from = Math.floor(Math.log10(lo));
   const to = Math.ceil(Math.log10(hi));
   for (let k = from; k <= to && out.length < MAX_TICKS; k++) {
@@ -181,8 +198,9 @@ function logTicks(lo, hi) {
 }
 
 /** Keep a 301-decade axis from emitting 301 labelled gridlines. */
+/** @param {number[]} ticks @returns {number[]} */
 function thin(ticks) {
   if (ticks.length <= MAX_TICKS) return ticks;
   const stride = Math.ceil(ticks.length / MAX_TICKS);
-  return ticks.filter((_, i) => i % stride === 0 || i === ticks.length - 1);
+  return ticks.filter((_, /** @type {number} */ i) => i % stride === 0 || i === ticks.length - 1);
 }
