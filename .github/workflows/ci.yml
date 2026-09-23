@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # `npm ci` and an exact pin, not `npm install` and a caret: the committed
+      # declarations are compiler output, so the drift gate below is only
+      # meaningful if every run uses the same compiler. A caret let CI resolve a
+      # newer tsc that emits `target?: number` where 5.6.3 emits
+      # `target?: number | undefined`, and the gate fired on that alone.
+      - name: Install the one dev dependency, exactly
+        run: npm ci --no-audit --no-fund
+
+      - name: Run the suite
+        run: node --test
+
+      - name: The types check against the code
+        run: npx tsc --noEmit
+
+      - name: The committed declarations are current
+        run: |
+          npx tsc
+          git diff --exit-code -- types/ \
+            || { echo "types/ is stale: run npx tsc and commit the result"; exit 1; }
+
+      - name: The packed tarball is exactly the allowlist
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const pack = require("/tmp/pack.json")[0];
+            const allowed = /^(src\/|types\/|README\.md$|CHANGELOG\.md$|LICENSE$|package\.json$)/;
+            const strays = pack.files.map((f) => f.path).filter((p) => !allowed.test(p));
+            if (strays.length) {
+              console.error("these would ship and should not:\n  " + strays.join("\n  "));
+              process.exit(1);
+            }
+            console.log(`${pack.files.length} files, all inside the allowlist`);
+          '
