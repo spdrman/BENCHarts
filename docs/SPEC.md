@@ -461,7 +461,7 @@ MapReduce red.
 | Surface (painted by the SVG) | `#ffffff` | `#1a1a19` |
 | Primary ink | `#1f1f1f` | `#f2f2f0` |
 | Secondary ink | `#52514e` | `#c3c2b7` |
-| Muted ink | `#898781` | `#898781` |
+| Muted ink | `#6b6a64` | `#898781` |
 | Gridline | `#e3e2dd` | `#2c2c2a` |
 | Baseline and axis | `#c3c2b7` | `#383835` |
 | De-emphasis (facet context) | `#c3c2b7` | `#4a4a47` |
