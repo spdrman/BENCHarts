@@ -42,7 +42,7 @@ export const INK: Readonly<{
         surface: "#ffffff";
         primary: "#1f1f1f";
         secondary: "#52514e";
-        muted: "#898781";
+        muted: "#6b6a64";
         grid: "#e3e2dd";
         axis: "#c3c2b7";
         deemphasis: "#c3c2b7";

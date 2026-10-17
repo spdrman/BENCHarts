@@ -84,7 +84,9 @@ test('ink reads against its own surface', () => {
       `${mode} primary ink is ${contrast(tokens.primary, tokens.surface).toFixed(2)}`);
     assert.ok(contrast(tokens.secondary, tokens.surface) >= 4.5,
       `${mode} secondary ink is ${contrast(tokens.secondary, tokens.surface).toFixed(2)}`);
-    assert.ok(contrast(tokens.muted, tokens.surface) >= 3,
+    // Muted ink is the 9px tick label colour, so it is normal text: 4.5, not the 3
+    // that large text and UI components get.
+    assert.ok(contrast(tokens.muted, tokens.surface) >= 4.5,
       `${mode} muted ink is ${contrast(tokens.muted, tokens.surface).toFixed(2)}`);
   }
 });
